@@ -16,6 +16,7 @@ Commands:
   mcts.py next --run-dir RUN_DIR
   mcts.py update --run-dir RUN_DIR --candidate-id ID --score X
   mcts.py discard-pending --run-dir RUN_DIR
+  mcts.py remove --run-dir RUN_DIR --candidate-id ID
   mcts.py show --run-dir RUN_DIR
   mcts.py tree --run-dir RUN_DIR
 """
@@ -28,10 +29,13 @@ import json
 import math
 import os
 import re
+import shutil
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+CANDIDATE_RE = re.compile(r"^[0-9]{4}$")
 
 ROOT_ID = "root"
 DEFAULT_UCB_C = 10.0
@@ -416,6 +420,52 @@ def cmd_discard_pending(args: argparse.Namespace) -> None:
             print(f"DISCARDED_WORKDIR: {workdir}")
 
 
+def cmd_remove(args: argparse.Namespace) -> None:
+    """Take an unscored leaf off the tree, and its directory with it.
+
+    The next id is max(remaining)+1, which this already is: ids come from
+    the node set, not a counter. Removing the current high end reuses that
+    number; a hole in the middle stays a hole. A scored node is a result
+    and a parent still has descendants, so neither is this command's.
+    """
+    cid = args.candidate_id
+    if not CANDIDATE_RE.match(cid):
+        raise SystemExit(f"unknown candidate id: {cid}")
+    run_dir = Path(args.run_dir)
+    with _state_lock(run_dir):
+        if not _state_path(run_dir).exists():
+            raise SystemExit(f"no state file in {run_dir}")
+        state = _load_state(run_dir)
+        nodes = state["nodes"]
+        node = nodes.get(cid)
+        if node is None or cid == ROOT_ID:
+            raise SystemExit(f"unknown candidate id: {cid}")
+        if node.get("children"):
+            raise SystemExit(f"candidate has children: {cid}")
+        scored = (node.get("status") == "done"
+                  or isinstance(node.get("score"), (int, float)))
+        if scored:
+            raise SystemExit(f"candidate is scored: {cid}")
+        parent_id = node.get("parent")
+        parent = nodes.get(parent_id)
+        if parent is None:
+            raise SystemExit(f"unknown parent of {cid}")
+        parent["children"] = [c for c in parent.get("children", []) if c != cid]
+        del nodes[cid]
+        workdir = _candidate_dir(run_dir, cid)
+        if workdir.exists():
+            # Inside the lock so a concurrent next cannot be handed this id
+            # while the directory is still there, and cannot recreate it
+            # under a name we are about to rmtree.
+            try:
+                workdir.resolve().relative_to(run_dir.resolve())
+            except ValueError:
+                raise SystemExit(f"candidate directory is outside the tree: {cid}") from None
+            shutil.rmtree(workdir)
+        _save_state(run_dir, state)
+    print(f"REMOVED: {cid}")
+
+
 def cmd_next(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     with _state_lock(run_dir):
@@ -557,6 +607,11 @@ def main() -> None:
     p_discard = sub.add_parser("discard-pending")
     p_discard.add_argument("--run-dir", required=True)
     p_discard.set_defaults(func=cmd_discard_pending)
+
+    p_remove = sub.add_parser("remove")
+    p_remove.add_argument("--run-dir", required=True)
+    p_remove.add_argument("--candidate-id", required=True)
+    p_remove.set_defaults(func=cmd_remove)
 
     p_next = sub.add_parser("next")
     p_next.add_argument("--run-dir", required=True)
