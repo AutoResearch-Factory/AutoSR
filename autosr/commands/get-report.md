@@ -1,10 +1,10 @@
 ---
 name: get-report
-description: Generate a final AgonSR report from a completed llm-mcts run
+description: Generate a final AutoSR report from a completed llm-mcts run
 argument-hint: "[run-dir] [free-form user instructions]"
 ---
 
-Generate a polished final report for an existing AgonSR symbolic-regression run.
+Generate a polished final report for an existing AutoSR symbolic-regression run.
 
 ## Argument parsing
 
@@ -37,7 +37,7 @@ Generate a polished final report for an existing AgonSR symbolic-regression run.
 
 ## Report requirements
 
-- Title the report `# AgonSR Report: <problem title or run name>`.
+- Title the report `# AutoSR Report: <problem title or run name>`.
 - The report must be self-contained enough to share with an outside reader. Explain the problem, variables, score meaning, best formula, metrics, and intuition without requiring access to proposer/reviewer internal notes.
 - Never leave internal proposer-comparison language in the best-result or appendix sections. Avoid phrases such as "father", "grandfather", "sibling", "ancestor", "the proposer improved", or "the reviewer says" there.
 - In the MCTS/family section, you may discuss search evolution and lineage using neutral language, for example `0001 → 0002 → 0013`.
@@ -50,7 +50,7 @@ Generate a polished final report for an existing AgonSR symbolic-regression run.
 Use this structure unless `USER_NOTES` explicitly requests a compatible variation:
 
 ```markdown
-# AgonSR Report: <problem title or run name>
+# AutoSR Report: <problem title or run name>
 
 ## 1. Best result
 

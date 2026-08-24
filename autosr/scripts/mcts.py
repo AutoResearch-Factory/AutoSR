@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCTS scheduler for AgonSR.
+"""MCTS scheduler for AutoSR.
 
 This script does not call LLMs and does not evaluate candidates.
 It only manages tree state and returns the next candidate workdir.
