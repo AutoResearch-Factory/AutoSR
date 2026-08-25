@@ -15,7 +15,7 @@ Your task is to review the candidate ansatz in `WORKDIR` according to the proble
 - First, read `${CLAUDE_PLUGIN_ROOT}/references/project_manual.md`. This is MANDATORY. You are the ansatz reviewer described in this manual.
 - The dispatcher will provide `PROBLEM_PATH` and `WORKDIR`.
 - Read `PROBLEM_PATH` and the relevant data, scripts, and documents mentioned there.
-- Find the score scale in `PROBLEM_PATH`. You must report the score on that scale.
+- Find the score scale in `PROBLEM_PATH`.
 - Read `<WORKDIR>/ansatz.md` and relevant artifacts in `WORKDIR`.
 
 ## Workflow
@@ -38,23 +38,15 @@ Append or replace exactly this block in `<WORKDIR>/ansatz.md`:
 </review>
 ```
 
-`X` is the total score from the problem scoring rule. Do not write a subtotal.
-Do not write a component score.
+`X` is the total score from the problem scoring rule. Do not write a subtotal or a component score.
 
-Write `X` as a number on the scale that `PROBLEM_PATH` gives. Obey these rules:
+Write `X` on the scale that `PROBLEM_PATH` gives. Do not change that scale. For a percentage scale, write `97.32`, not `0.9732`.
 
-- Do not write a fraction of that scale.
-- Do not write a percentage of that scale.
-- Do not write a form such as `75/100`.
-- If the problem gives a percentage scale, write `97.32`. Do not write `0.9732`.
-
-If `PROBLEM_PATH` does not give a scale, do not invent one. Use the most simple
-meaning of the scoring rule. Then write in the review which scale you used.
+If `PROBLEM_PATH` does not give a scale, use the most simple meaning of the scoring rule. Then write in the review which scale you used.
 
 Before you stop, make these checks:
 
-- The value `score="X"` and the final score in the review are the same.
-- The sum of the components and the final score are the same.
+- The value `score="X"`, the final score in the review, and the component sum are the same.
 - The value `X` is on the scale that `PROBLEM_PATH` gives.
 
 Put all review content inside this block. Do not write `## Ansatz Reviewer Review` or any review text outside it.
