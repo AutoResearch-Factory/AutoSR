@@ -1,5 +1,7 @@
 # AutoSR
 
+English | [中文](README_zh.md)
+
 AutoSR ([paper](https://arxiv.org/abs/2608.16876)) is a Claude Code plugin for symbolic ansatz search.
 Problems and generated artifacts live outside the plugin, usually in a problem workspace such as `artifacts/pile_efficiency/`.
 The [`artifacts/`](https://github.com/WhymustIhaveaname/AutoSR-artifacts) directory is a separate git submodule/repo for problem workspaces, data, runs, and generated outputs.
