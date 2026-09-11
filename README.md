@@ -27,6 +27,8 @@ Resume an existing run:
 
 `problem.md` should contain the actual problem definition: objective, variables, data/docs/scripts to read, constraints, evaluation method, scoring rubric, and expected `ansatz.md` contents. Use paths relative to the problem workspace.
 
+`problem.md` must also give the score scale. All reviews in the project must use that scale. Also give an example of the calculation. For a percentage scale, an accuracy of `0.9732` is written `<review score="97.32">`. If the scoring rule has no limits, write this in `problem.md`. Do not invent limits.
+
 ## `IGNOREME.md`
 
 Optional. Put special per-role notes here when they should not live in the general problem statement. Format:
