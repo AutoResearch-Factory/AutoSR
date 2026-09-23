@@ -11,6 +11,8 @@ AutoSR 模拟人类进行科学发现的流程通过在 Research State 中搜索
 
 直接登录 [autosr.app](https://autosr.app) 即可开始使用!
 
+![AutoSR overview](figures/autosr_overview.png)
+
 ## 以 Claude Code 插件方式启动
 
 问题和生成出的产物放在插件之外, 通常在一个 problem workspace 里, 例如 `artifacts/pile_efficiency/`.

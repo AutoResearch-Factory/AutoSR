@@ -11,6 +11,8 @@ AutoSR performs symbolic regression by searching through Research States, follow
 
 Log in to [autosr.app](https://autosr.app) to get started!
 
+![AutoSR overview](figures/autosr_overview.png)
+
 ## Start Claude Code as a plugin
 
 Problems and generated artifacts live outside the plugin, usually in a problem workspace such as `artifacts/pile_efficiency/`.
