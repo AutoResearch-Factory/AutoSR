@@ -1,5 +1,7 @@
 # AutoSR
 
+[![Project page](https://img.shields.io/badge/project-page-1f6feb.svg)](https://autosr.app) [![arXiv](https://img.shields.io/badge/arXiv-2608.16876-b31b1b.svg)](https://arxiv.org/abs/2608.16876) [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2.svg)](https://claude.com/claude-code)
+
 [English](README.md) | 中文
 
 AutoSR ([论文](https://arxiv.org/abs/2608.16876)) 是一个用于符号 ansatz 搜索的 Claude Code 插件.
