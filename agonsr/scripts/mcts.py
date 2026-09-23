@@ -17,8 +17,13 @@ Commands:
   mcts.py update --run-dir RUN_DIR --candidate-id ID --score X
   mcts.py discard-pending --run-dir RUN_DIR
   mcts.py remove --run-dir RUN_DIR --candidate-id ID
+  mcts.py mark --run-dir RUN_DIR [--allow IDS] [--deny IDS]
   mcts.py show --run-dir RUN_DIR
   mcts.py tree --run-dir RUN_DIR
+
+`mark` is the owner overriding the allocator: `--allow` restricts parenthood to
+the named nodes, `--deny` bars the named nodes from it. `next` exits 3 when the
+marks leave it nothing to hand out, which means wait, not fail.
 """
 
 from __future__ import annotations
@@ -38,6 +43,10 @@ from pathlib import Path
 CANDIDATE_RE = re.compile(r"^[0-9]{4}$")
 
 ROOT_ID = "root"
+# `next` had nothing to hand out because every node the owner allowed to bear
+# children is already bearing one. Its own code: the caller waits and asks
+# again, where every other non-zero exit means the search cannot continue.
+NO_PARENT_EXIT = 3
 DEFAULT_UCB_C = 10.0
 DEFAULT_PW_K = 1.0
 DEFAULT_PW_ALPHA = 0.5
@@ -157,7 +166,43 @@ def _initial_state(run_dir: Path, score_direction: str, ucb_c: float,
             "pw_alpha": pw_alpha,
         },
         "nodes": {ROOT_ID: _new_node(ROOT_ID, None, 0, status="root")},
+        "spawn": _empty_spawn(),
     }
+
+
+# --- who is allowed to have children ----------------------------------------
+#
+# The owner watches the tree and can see what the allocator cannot: that a
+# branch is a dead end, or that one node is the only one worth deepening. These
+# two sets are how they say so. `allow` non-empty means *only* those nodes may
+# be a parent; `deny` names nodes that may not, and says nothing about their
+# descendants. Empty on both counts is the old behaviour exactly.
+
+
+def _empty_spawn() -> dict:
+    return {"allow": [], "deny": []}
+
+
+def _spawn(state: dict) -> tuple[set[str], set[str]]:
+    """The two sets, from a tree that may predate them."""
+    marks = state.get("spawn") or {}
+    return set(marks.get("allow") or []), set(marks.get("deny") or [])
+
+
+def _forget_node(state: dict, cid: str) -> None:
+    """Drop a node from both sets, for when it leaves the tree.
+
+    A `remove` or a `discard-pending` that left the id behind would leave the
+    whitelist pointing at a node nobody can select, which is indistinguishable
+    from a whitelist that is simply never satisfiable — the run would refuse to
+    start and the page would show nothing ticked to explain why.
+    """
+    marks = state.get("spawn")
+    if not marks:
+        return
+    for key in ("allow", "deny"):
+        if cid in (marks.get(key) or []):
+            marks[key] = [x for x in marks[key] if x != cid]
 
 
 def _next_candidate_id(state: dict) -> str:
@@ -300,19 +345,33 @@ def _should_widen(state: dict, pending_counts: dict[str, int], node_id: str,
     return done_child_count < pw_k * (max(samples, 1) ** pw_alpha)
 
 
-def _select_parent(state: dict) -> str:
+def _select_parent(state: dict) -> str | None:
+    """The node to hang the next candidate off, or None if there is none.
+
+    None is new, and it is only reachable when the owner has marked the tree.
+    Without marks the root is the standing fallback and this always returns
+    something; with them, "every node the owner allowed is busy right now" is a
+    real state, and the caller waits rather than quietly expanding a node the
+    owner ruled out.
+    """
     rewards = _node_rewards(state)
     pending_counts = _pending_counts(state)
+    allow, deny = _spawn(state)
     c = state["config"]["ucb_c"]
     pw_k = state["config"]["pw_k"]
     pw_alpha = state["config"]["pw_alpha"]
 
-    def search(node_id: str) -> str | None:
+    def eligible(node_id: str) -> bool:
+        return node_id not in deny and (not allow or node_id in allow)
+
+    def search(node_id: str, widening: bool) -> str | None:
         # A non-root node may have at most one direct pending child. While that
         # child is running, the node itself cannot be expanded again, although
         # its completed descendants remain selectable.
         can_expand = node_id == ROOT_ID or not _has_pending_child(state, node_id)
-        if can_expand and _should_widen(state, pending_counts, node_id, pw_k, pw_alpha):
+        if can_expand and eligible(node_id) and (
+                not widening
+                or _should_widen(state, pending_counts, node_id, pw_k, pw_alpha)):
             return node_id
 
         done_children = _done_children(state, node_id)
@@ -322,14 +381,40 @@ def _select_parent(state: dict) -> str:
             reverse=True,
         )
         for child_id in ranked_children:
-            selected = search(child_id)
+            selected = search(child_id, widening)
             if selected is not None:
                 return selected
         return None
 
     # If every non-root branch is busy, root is the deliberate fallback even
-    # when its progressive-widening condition is currently closed.
-    return search(ROOT_ID) or ROOT_ID
+    # when its progressive-widening condition is currently closed — but only
+    # while the owner has not ruled the root out. Falling back to it against a
+    # whitelist that excludes it, or against an explicit deny, would be the one
+    # instruction this feature exists to obey being overridden by a fallback.
+    selected = search(ROOT_ID, widening=True)
+    if selected is not None:
+        return selected
+    if eligible(ROOT_ID):
+        return ROOT_ID
+
+    # Nothing the owner allowed is open, and the root is not theirs to fall
+    # back on. Before giving up, ask again without progressive widening.
+    #
+    # That rule is a guess about where a search should spend itself, and it
+    # cannot survive a narrow whitelist: widening opens while
+    # done_children < pw_k * samples**pw_alpha, and a node's own children raise
+    # both sides — with the defaults that reads n < sqrt(n), false from the
+    # first child on. So a single whitelisted node would bear one candidate and
+    # then never another, every worker waiting on it, the run deadlocked.
+    #
+    # Second pass rather than an exemption, because an exemption costs the
+    # thing widening is for. Returning the first eligible node found top-down
+    # means the shallowest always wins, so a whitelisted node would out-rank
+    # its own children forever and the tree would grow sideways in one flat
+    # row — the inheritance that lets a search deepen would buy nothing. This
+    # way the UCB descent still decides while it has any say, and the bare
+    # first-come rule applies only where the alternative is not searching.
+    return search(ROOT_ID, widening=False)
 
 
 def _backprop_visit(state: dict, node_id: str) -> None:
@@ -390,6 +475,38 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"RUN_DIR: {run_dir}")
 
 
+def cmd_set_direction(args: argparse.Namespace) -> None:
+    """Point an existing search the other way.
+
+    Nothing stored is direction-dependent: `score` is the number the reviewer
+    gave and `visits` counts work done, and both mean the same either way. The
+    direction is read where a comparison is made — `_percentile_reward` and the
+    sort in `cmd_show` — so changing it here re-ranks the tree and destroys no
+    result. A search reversed after twenty candidates keeps all twenty; the
+    twenty simply change places.
+
+    Which is why this exists rather than a refusal. `init` takes the direction
+    once, and for a while a resume that disagreed was a hard failure telling
+    the owner to start a new project — throwing away every scored candidate to
+    change a comparison operator. They know what they are optimising; if they
+    say the other way, the search goes the other way.
+    """
+    run_dir = Path(args.run_dir)
+    with _state_lock(run_dir):
+        if not _state_path(run_dir).exists():
+            raise SystemExit(f"no state file in {run_dir}")
+        state = _load_state(run_dir)
+        before = _score_direction(state)
+        if before == args.score_direction:
+            print(f"SCORE_DIRECTION: {before} (unchanged)")
+            return
+        state["config"]["score_direction"] = args.score_direction
+        _save_state(run_dir, state)
+        scored = len(_score_history(state))
+    print(f"SCORE_DIRECTION: {before} -> {args.score_direction}")
+    print(f"RERANKED: {scored} scored candidate(s) keep their scores")
+
+
 def cmd_discard_pending(args: argparse.Namespace) -> None:
     """Give up on candidates that were in flight when a run died.
 
@@ -409,6 +526,11 @@ def cmd_discard_pending(args: argparse.Namespace) -> None:
             if nodes[cid]["children"]:
                 raise SystemExit(f"pending candidate has children: {cid}")
             nodes[cid]["status"] = "discarded"
+            # It stays in the tree as a tombstone, but it can never be a
+            # parent again, so leaving it whitelisted would only narrow the
+            # whitelist to nodes that cannot be chosen. A candidate that
+            # inherited the mark on the way in gives it up on the way out.
+            _forget_node(state, cid)
         if pending_ids:
             _save_state(run_dir, state)
 
@@ -418,6 +540,54 @@ def cmd_discard_pending(args: argparse.Namespace) -> None:
                            and _candidate_dir(run_dir, cid).exists())
         for workdir in discarded:
             print(f"DISCARDED_WORKDIR: {workdir}")
+
+
+def _parse_id_list(raw: str | None) -> list[str]:
+    """A comma-separated id list, in the order given and without repeats."""
+    out: list[str] = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if part and part not in out:
+            out.append(part)
+    return out
+
+
+def cmd_mark(args: argparse.Namespace) -> None:
+    """Set who may have children, replacing both sets outright.
+
+    Replacing rather than adding: the page sends what its boxes say, and a
+    tick removed there has to mean the same as a tick never made. Two sets go
+    over together because the invariant that matters — no node in both — is
+    not something either half can check alone.
+    """
+    allow = _parse_id_list(args.allow)
+    deny = _parse_id_list(args.deny)
+    both = sorted(set(allow) & set(deny))
+    if both:
+        raise SystemExit(f"a node cannot be both allowed and denied: {', '.join(both)}")
+
+    run_dir = Path(args.run_dir)
+    with _state_lock(run_dir):
+        if not _state_path(run_dir).exists():
+            raise SystemExit(f"no state file in {run_dir}")
+        state = _load_state(run_dir)
+        nodes = state["nodes"]
+        for cid in allow + deny:
+            if cid not in nodes:
+                raise SystemExit(f"unknown candidate id: {cid}")
+        # Only the root and scored nodes can be selected as a parent at all —
+        # `_select_parent` descends through done children and nothing else. So
+        # a pending or discarded node in the whitelist is not a narrow search,
+        # it is a search with no legal move, and the run would refuse to start
+        # for a reason the tree does not show. Refuse it here, where the owner
+        # is looking at the box they just ticked.
+        for cid in allow:
+            if cid != ROOT_ID and nodes[cid].get("status") != "done":
+                raise SystemExit(f"candidate is not scored: {cid}")
+        state["spawn"] = {"allow": allow, "deny": deny}
+        _save_state(run_dir, state)
+    print(f"ALLOW: {' '.join(allow) if allow else '(any)'}")
+    print(f"DENY: {' '.join(deny) if deny else '(none)'}")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
@@ -452,6 +622,7 @@ def cmd_remove(args: argparse.Namespace) -> None:
             raise SystemExit(f"unknown parent of {cid}")
         parent["children"] = [c for c in parent.get("children", []) if c != cid]
         del nodes[cid]
+        _forget_node(state, cid)
         workdir = _candidate_dir(run_dir, cid)
         if workdir.exists():
             # Inside the lock so a concurrent next cannot be handed this id
@@ -476,11 +647,26 @@ def cmd_next(args: argparse.Namespace) -> None:
             raise SystemExit(f"no state file in {run_dir}; run `mcts.py init` first")
         state = _load_state(run_dir)
         parent_id = _select_parent(state)
+        if parent_id is None:
+            # Not an error. Every node the owner allowed to have children is
+            # busy with one, and the caller's business is to wait for one of
+            # them to finish — so this exits on its own code rather than
+            # joining the failures that mean the search cannot go on.
+            print("NO_ELIGIBLE_PARENT")
+            raise SystemExit(NO_PARENT_EXIT)
         parent = state["nodes"][parent_id]
         cid = _next_candidate_id(state)
         state["nodes"][cid] = _new_node(cid, parent_id, parent["depth"] + 1,
                                         status="pending")
         parent["children"].append(cid)
+        # A whitelist is about where to search, not about which four digits are
+        # blessed, so what a whitelisted node bears is whitelisted too —
+        # otherwise the search could go one generation deep and stop. Written
+        # here, under the same lock and in the same save as the node itself, so
+        # the tree and the marks cannot disagree.
+        allow, _ = _spawn(state)
+        if allow:
+            state.setdefault("spawn", _empty_spawn())["allow"].append(cid)
         _candidate_dir(run_dir, cid).mkdir(parents=True, exist_ok=True)
         _save_state(run_dir, state)
         _print_next(state, run_dir, cid)
@@ -604,6 +790,12 @@ def main() -> None:
     p_init.add_argument("--pw-alpha", type=float, default=DEFAULT_PW_ALPHA)
     p_init.set_defaults(func=cmd_init)
 
+    p_dir = sub.add_parser("set-direction")
+    p_dir.add_argument("--run-dir", required=True)
+    p_dir.add_argument("--score-direction", required=True,
+                       choices=["maximize", "minimize"])
+    p_dir.set_defaults(func=cmd_set_direction)
+
     p_discard = sub.add_parser("discard-pending")
     p_discard.add_argument("--run-dir", required=True)
     p_discard.set_defaults(func=cmd_discard_pending)
@@ -612,6 +804,16 @@ def main() -> None:
     p_remove.add_argument("--run-dir", required=True)
     p_remove.add_argument("--candidate-id", required=True)
     p_remove.set_defaults(func=cmd_remove)
+
+    p_mark = sub.add_parser("mark")
+    p_mark.add_argument("--run-dir", required=True)
+    p_mark.add_argument("--allow", default="",
+                        help="comma-separated ids; only these may have "
+                             "children. Empty means any node may.")
+    p_mark.add_argument("--deny", default="",
+                        help="comma-separated ids that may not have children. "
+                             "Says nothing about their descendants.")
+    p_mark.set_defaults(func=cmd_mark)
 
     p_next = sub.add_parser("next")
     p_next.add_argument("--run-dir", required=True)
