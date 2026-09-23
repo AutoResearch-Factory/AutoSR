@@ -11,3 +11,8 @@ __pycache__/
 # docs now answer, and they go out with a push nobody meant to make. The files
 # stay on disk; this only stops them coming back.
 docs/superpowers/
+
+# Problem workspaces. Locally this holds every problem, its data and its runs;
+# the public repository carries only the README that says what goes here.
+/artifacts/*
+!/artifacts/README.md

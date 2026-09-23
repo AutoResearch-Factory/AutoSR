@@ -4,7 +4,7 @@
 
 AutoSR ([论文](https://arxiv.org/abs/2608.16876)) 是一个用于符号 ansatz 搜索的 Claude Code 插件.
 问题和生成出的产物放在插件之外, 通常在一个 problem workspace 里, 例如 `artifacts/pile_efficiency/`.
-[`artifacts/`](https://github.com/WhymustIhaveaname/AutoSR-artifacts) 目录是一个独立的 git submodule/仓库, 存放 problem workspace, 数据, 运行记录和生成产物.
+`artifacts/` 目录用来存放 problem workspace; 仓库里只追踪它的 README, 数据, 运行记录和生成产物都只留在本地.
 
 ## 以插件方式启动 Claude Code
 
